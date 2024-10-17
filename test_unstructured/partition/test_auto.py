@@ -289,79 +289,79 @@ def test_auto_partition_html_pre_from_file():
 # ================================================================================================
 
 
-@pytest.mark.parametrize(
-    ("pass_metadata_filename", "content_type"),
-    [(False, None), (False, "image/jpeg"), (True, "image/jpeg"), (True, None)],
-)
-def test_auto_partition_jpeg_from_filename(pass_metadata_filename: bool, content_type: str | None):
-    file_path = example_doc_path("img/layout-parser-paper-fast.jpg")
-    metadata_filename = file_path if pass_metadata_filename else None
+# @pytest.mark.parametrize(
+#     ("pass_metadata_filename", "content_type"),
+#     [(False, None), (False, "image/jpeg"), (True, "image/jpeg"), (True, None)],
+# )
+# def test_auto_partition_jpeg_from_filename(pass_metadata_filename: bool, content_type: str | None):
+#     file_path = example_doc_path("img/layout-parser-paper-fast.jpg")
+#     metadata_filename = file_path if pass_metadata_filename else None
 
-    elements = partition(
-        filename=file_path,
-        metadata_filename=metadata_filename,
-        content_type=content_type,
-        strategy=PartitionStrategy.AUTO,
-    )
+#     elements = partition(
+#         filename=file_path,
+#         metadata_filename=metadata_filename,
+#         content_type=content_type,
+#         strategy=PartitionStrategy.AUTO,
+#     )
 
-    e = elements[2]
-    assert e.text == (
-        "LayoutParser: A Unified Toolkit for Deep Learning Based Document Image Analysis"
-    )
-    assert e.metadata.coordinates is not None
-
-
-@pytest.mark.parametrize(
-    ("pass_metadata_filename", "content_type"),
-    [(False, None), (False, "image/jpeg"), (True, "image/jpeg"), (True, None)],
-)
-def test_auto_partition_jpeg_from_file(pass_metadata_filename: bool, content_type: str | None):
-    file_path = example_doc_path("img/layout-parser-paper-fast.jpg")
-    metadata_filename = file_path if pass_metadata_filename else None
-
-    with open(file_path, "rb") as f:
-        elements = partition(
-            file=f,
-            metadata_filename=metadata_filename,
-            content_type=content_type,
-            strategy=PartitionStrategy.AUTO,
-        )
-
-    e = elements[2]
-    assert e.text == (
-        "LayoutParser: A Unified Toolkit for Deep Learning Based Document Image Analysis"
-    )
-    assert e.metadata.coordinates is not None
+#     e = elements[2]
+#     assert e.text == (
+#         "LayoutParser: A Unified Toolkit for Deep Learning Based Document Image Analysis"
+#     )
+#     assert e.metadata.coordinates is not None
 
 
-def test_auto_partition_bmp_from_filename(tmp_path: pathlib.Path):
-    bmp_filename = str(tmp_path / "example.bmp")
-    with Image.open(example_doc_path("img/layout-parser-paper-with-table.jpg")) as img:
-        img.save(bmp_filename)
+# @pytest.mark.parametrize(
+#     ("pass_metadata_filename", "content_type"),
+#     [(False, None), (False, "image/jpeg"), (True, "image/jpeg"), (True, None)],
+# )
+# def test_auto_partition_jpeg_from_file(pass_metadata_filename: bool, content_type: str | None):
+#     file_path = example_doc_path("img/layout-parser-paper-fast.jpg")
+#     metadata_filename = file_path if pass_metadata_filename else None
 
-    elements = partition(filename=bmp_filename, strategy=PartitionStrategy.HI_RES)
+#     with open(file_path, "rb") as f:
+#         elements = partition(
+#             file=f,
+#             metadata_filename=metadata_filename,
+#             content_type=content_type,
+#             strategy=PartitionStrategy.AUTO,
+#         )
 
-    table = [e.metadata.text_as_html for e in elements if e.metadata.text_as_html]
-    assert len(table) == 1
-    assert "<table><thead><tr>" in table[0]
-    assert "</thead><tbody><tr>" in table[0]
+#     e = elements[2]
+#     assert e.text == (
+#         "LayoutParser: A Unified Toolkit for Deep Learning Based Document Image Analysis"
+#     )
+#     assert e.metadata.coordinates is not None
 
 
-@pytest.mark.parametrize("extract_image_block_to_payload", [False, True])
-def test_auto_partition_image_element_extraction(extract_image_block_to_payload: bool):
-    extract_image_block_types = ["Image", "Table"]
+# def test_auto_partition_bmp_from_filename(tmp_path: pathlib.Path):
+#     bmp_filename = str(tmp_path / "example.bmp")
+#     with Image.open(example_doc_path("img/layout-parser-paper-with-table.jpg")) as img:
+#         img.save(bmp_filename)
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        elements = partition(
-            filename=example_doc_path("img/embedded-images-tables.jpg"),
-            extract_image_block_types=extract_image_block_types,
-            extract_image_block_to_payload=extract_image_block_to_payload,
-            extract_image_block_output_dir=tmpdir,
-        )
+#     elements = partition(filename=bmp_filename, strategy=PartitionStrategy.HI_RES)
 
-        assert_element_extraction(
-            elements, extract_image_block_types, extract_image_block_to_payload, tmpdir
-        )
+#     table = [e.metadata.text_as_html for e in elements if e.metadata.text_as_html]
+#     assert len(table) == 1
+#     assert "<table><thead><tr>" in table[0]
+#     assert "</thead><tbody><tr>" in table[0]
+
+
+# @pytest.mark.parametrize("extract_image_block_to_payload", [False, True])
+# def test_auto_partition_image_element_extraction(extract_image_block_to_payload: bool):
+#     extract_image_block_types = ["Image", "Table"]
+
+#     with tempfile.TemporaryDirectory() as tmpdir:
+#         elements = partition(
+#             filename=example_doc_path("img/embedded-images-tables.jpg"),
+#             extract_image_block_types=extract_image_block_types,
+#             extract_image_block_to_payload=extract_image_block_to_payload,
+#             extract_image_block_output_dir=tmpdir,
+#         )
+
+#         assert_element_extraction(
+#             elements, extract_image_block_types, extract_image_block_to_payload, tmpdir
+#         )
 
 
 # ================================================================================================
@@ -496,55 +496,55 @@ def test_auto_partition_org_from_file():
 # ================================================================================================
 
 
-@pytest.mark.parametrize(
-    ("pass_metadata_filename", "content_type"),
-    [(False, None), (False, "application/pdf"), (True, "application/pdf"), (True, None)],
-)
-def test_auto_partition_pdf_from_filename(pass_metadata_filename: bool, content_type: str | None):
-    file_path = example_doc_path("pdf/chevron-page.pdf")
-    metadata_filename = file_path if pass_metadata_filename else None
+# @pytest.mark.parametrize(
+#     ("pass_metadata_filename", "content_type"),
+#     [(False, None), (False, "application/pdf"), (True, "application/pdf"), (True, None)],
+# )
+# def test_auto_partition_pdf_from_filename(pass_metadata_filename: bool, content_type: str | None):
+#     file_path = example_doc_path("pdf/chevron-page.pdf")
+#     metadata_filename = file_path if pass_metadata_filename else None
 
-    elements = partition(
-        filename=file_path,
-        metadata_filename=metadata_filename,
-        content_type=content_type,
-        strategy=PartitionStrategy.HI_RES,
-    )
+#     elements = partition(
+#         filename=file_path,
+#         metadata_filename=metadata_filename,
+#         content_type=content_type,
+#         strategy=PartitionStrategy.HI_RES,
+#     )
 
-    e = elements[0]
-    assert isinstance(e, Title)
-    assert e.text.startswith("eastern mediterranean")
-    assert e.metadata.filename == os.path.basename(file_path)
-    assert e.metadata.file_directory == os.path.split(file_path)[0]
+#     e = elements[0]
+#     assert isinstance(e, Title)
+#     assert e.text.startswith("eastern mediterranean")
+#     assert e.metadata.filename == os.path.basename(file_path)
+#     assert e.metadata.file_directory == os.path.split(file_path)[0]
 
-    e = elements[1]
-    assert isinstance(e, NarrativeText)
-    assert e.text.startswith("We’re investing")
+#     e = elements[1]
+#     assert isinstance(e, NarrativeText)
+#     assert e.text.startswith("We’re investing")
 
 
-@pytest.mark.parametrize(
-    ("pass_metadata_filename", "content_type"),
-    [(False, None), (False, "application/pdf"), (True, "application/pdf"), (True, None)],
-)
-def test_auto_partition_pdf_from_file(pass_metadata_filename: bool, content_type: str | None):
-    file_path = example_doc_path("pdf/chevron-page.pdf")
-    metadata_filename = file_path if pass_metadata_filename else None
+# @pytest.mark.parametrize(
+#     ("pass_metadata_filename", "content_type"),
+#     [(False, None), (False, "application/pdf"), (True, "application/pdf"), (True, None)],
+# )
+# def test_auto_partition_pdf_from_file(pass_metadata_filename: bool, content_type: str | None):
+#     file_path = example_doc_path("pdf/chevron-page.pdf")
+#     metadata_filename = file_path if pass_metadata_filename else None
 
-    with open(file_path, "rb") as f:
-        elements = partition(
-            file=f,
-            metadata_filename=metadata_filename,
-            content_type=content_type,
-            strategy=PartitionStrategy.HI_RES,
-        )
+#     with open(file_path, "rb") as f:
+#         elements = partition(
+#             file=f,
+#             metadata_filename=metadata_filename,
+#             content_type=content_type,
+#             strategy=PartitionStrategy.HI_RES,
+#         )
 
-    e = elements[0]
-    assert isinstance(e, Title)
-    assert e.text.startswith("eastern mediterranean")
+#     e = elements[0]
+#     assert isinstance(e, Title)
+#     assert e.text.startswith("eastern mediterranean")
 
-    e = elements[1]
-    assert isinstance(e, NarrativeText)
-    assert e.text.startswith("We’re investing")
+#     e = elements[1]
+#     assert isinstance(e, NarrativeText)
+#     assert e.text.startswith("We’re investing")
 
 
 def test_auto_partition_pdf_with_fast_strategy(request: FixtureRequest):
@@ -579,33 +579,33 @@ def test_auto_partition_pdf_with_fast_strategy(request: FixtureRequest):
     )
 
 
-def test_auto_partition_pdf_uses_pdf_infer_table_structure_argument():
-    with patch(
-        "unstructured.partition.pdf_image.ocr.process_file_with_ocr",
-    ) as mock_process_file_with_model:
-        partition(
-            example_doc_path("pdf/layout-parser-paper-fast.pdf"),
-            pdf_infer_table_structure=True,
-            strategy=PartitionStrategy.HI_RES,
-        )
-        assert mock_process_file_with_model.call_args[1]["infer_table_structure"]
+# def test_auto_partition_pdf_uses_pdf_infer_table_structure_argument():
+#     with patch(
+#         "unstructured.partition.pdf_image.ocr.process_file_with_ocr",
+#     ) as mock_process_file_with_model:
+#         partition(
+#             example_doc_path("pdf/layout-parser-paper-fast.pdf"),
+#             pdf_infer_table_structure=True,
+#             strategy=PartitionStrategy.HI_RES,
+#         )
+#         assert mock_process_file_with_model.call_args[1]["infer_table_structure"]
 
 
-@pytest.mark.parametrize("extract_image_block_to_payload", [False, True])
-def test_auto_partition_pdf_element_extraction(extract_image_block_to_payload: bool):
-    extract_image_block_types = ["Image", "Table"]
+# @pytest.mark.parametrize("extract_image_block_to_payload", [False, True])
+# def test_auto_partition_pdf_element_extraction(extract_image_block_to_payload: bool):
+#     extract_image_block_types = ["Image", "Table"]
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        elements = partition(
-            example_doc_path("pdf/embedded-images-tables.pdf"),
-            extract_image_block_types=extract_image_block_types,
-            extract_image_block_to_payload=extract_image_block_to_payload,
-            extract_image_block_output_dir=tmpdir,
-        )
+#     with tempfile.TemporaryDirectory() as tmpdir:
+#         elements = partition(
+#             example_doc_path("pdf/embedded-images-tables.pdf"),
+#             extract_image_block_types=extract_image_block_types,
+#             extract_image_block_to_payload=extract_image_block_to_payload,
+#             extract_image_block_output_dir=tmpdir,
+#         )
 
-        assert_element_extraction(
-            elements, extract_image_block_types, extract_image_block_to_payload, tmpdir
-        )
+#         assert_element_extraction(
+#             elements, extract_image_block_types, extract_image_block_to_payload, tmpdir
+#         )
 
 
 def test_partition_pdf_does_not_raise_warning():

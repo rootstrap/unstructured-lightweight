@@ -205,3 +205,9 @@ TESSERACT_MAX_SIZE = 2147483647
 IMAGE_COLOR_DEPTH = 32
 
 HTML_MAX_PREDECESSOR_LEN = 15
+
+STRATEGY_NOT_IMPLEMENTED_MSGE = (
+    "{strategy} partitioning strategy not available in unstructured-lightweight.\n"
+    "To use this strategy install the official unstructured package:\n"
+    "https://github.com/Unstructured-IO/unstructured"
+)

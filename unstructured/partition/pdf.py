@@ -3,10 +3,7 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
-import os
 import re
-import warnings
-from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Optional, cast
 
 import numpy as np
@@ -15,8 +12,6 @@ from pdfminer import psparser
 from pdfminer.layout import LTChar, LTContainer, LTImage, LTItem, LTTextBox
 from pdfminer.pdftypes import PDFObjRef
 from pdfminer.utils import open_filename
-from pi_heif import register_heif_opener
-from PIL import Image as PILImage
 from pypdf import PdfReader
 
 from unstructured.chunking import add_chunking_strategy
@@ -29,23 +24,18 @@ from unstructured.documents.elements import (
     CoordinatesMetadata,
     Element,
     ElementMetadata,
-    ElementType,
-    Image,
     Link,
     ListItem,
     PageBreak,
     Text,
     process_metadata,
 )
-from unstructured.errors import PageCountExceededError
 from unstructured.file_utils.filetype import add_metadata_with_filetype
 from unstructured.file_utils.model import FileType
 from unstructured.logger import logger, trace_logger
 from unstructured.nlp.patterns import PARAGRAPH_PATTERN
 from unstructured.partition.common.common import (
-    document_to_element_list,
     exactly_one,
-    ocr_data_to_elements,
     spooled_to_bytes_io_if_needed,
 )
 from unstructured.partition.common.lang import (
@@ -54,23 +44,6 @@ from unstructured.partition.common.lang import (
     tesseract_to_paddle_language,
 )
 from unstructured.partition.common.metadata import get_last_modified_date
-from unstructured.partition.pdf_image.analysis.layout_dump import (
-    ExtractedLayoutDumper,
-    FinalLayoutDumper,
-    ObjectDetectionLayoutDumper,
-    OCRLayoutDumper,
-)
-from unstructured.partition.pdf_image.analysis.tools import save_analysis_artifiacts
-from unstructured.partition.pdf_image.form_extraction import run_form_extraction
-from unstructured.partition.pdf_image.pdf_image_utils import (
-    check_element_types_to_extract,
-    convert_pdf_to_images,
-    save_elements,
-)
-from unstructured.partition.pdf_image.pdfminer_processing import (
-    clean_pdfminer_inner_elements,
-    merge_inferred_with_extracted_layout,
-)
 from unstructured.partition.pdf_image.pdfminer_utils import (
     open_pdfminer_pages_generator,
     rect_to_bbox,
@@ -81,9 +54,8 @@ from unstructured.partition.utils.config import env_config
 from unstructured.partition.utils.constants import (
     OCR_AGENT_PADDLE,
     SORT_MODE_BASIC,
-    SORT_MODE_DONT,
     SORT_MODE_XY_CUT,
-    OCRMode,
+    STRATEGY_NOT_IMPLEMENTED_MSGE,
     PartitionStrategy,
 )
 from unstructured.partition.utils.sorting import coord_has_valid_points, sort_page_elements
@@ -98,17 +70,6 @@ if TYPE_CHECKING:
 psparser.PSBaseParser._parse_keyword = parse_keyword  # type: ignore
 
 RE_MULTISPACE_INCLUDING_NEWLINES = re.compile(pattern=r"\s+", flags=re.DOTALL)
-
-
-@requires_dependencies("unstructured_inference")
-def default_hi_res_model() -> str:
-    # a light config for the hi res model; this is not defined as a constant so that no setting of
-    # the default hi res model name is done on importing of this submodule; this allows (if user
-    # prefers) for setting env after importing the sub module and changing the default model name
-
-    from unstructured_inference.models.base import DEFAULT_MODEL
-
-    return os.environ.get("UNSTRUCTURED_HI_RES_MODEL_NAME", DEFAULT_MODEL)
 
 
 @process_metadata()
@@ -245,9 +206,6 @@ def partition_pdf_or_image(
     if languages is None:
         languages = ["eng"]
 
-    # init ability to process .heic files
-    register_heif_opener()
-
     validate_strategy(strategy, is_image)
 
     last_modified = get_last_modified_date(filename) if filename else None
@@ -289,32 +247,8 @@ def partition_pdf_or_image(
     if env_config.OCR_AGENT == OCR_AGENT_PADDLE:
         ocr_languages = tesseract_to_paddle_language(ocr_languages)
 
-    if strategy == PartitionStrategy.HI_RES:
-        # NOTE(robinson): Catches a UserWarning that occurs when detection is called
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            elements = _partition_pdf_or_image_local(
-                filename=filename,
-                file=spooled_to_bytes_io_if_needed(file),
-                is_image=is_image,
-                infer_table_structure=infer_table_structure,
-                include_page_breaks=include_page_breaks,
-                languages=languages,
-                ocr_languages=ocr_languages,
-                metadata_last_modified=metadata_last_modified or last_modified,
-                hi_res_model_name=hi_res_model_name,
-                pdf_text_extractable=pdf_text_extractable,
-                extract_images_in_pdf=extract_images_in_pdf,
-                extract_image_block_types=extract_image_block_types,
-                extract_image_block_output_dir=extract_image_block_output_dir,
-                extract_image_block_to_payload=extract_image_block_to_payload,
-                starting_page_number=starting_page_number,
-                extract_forms=extract_forms,
-                form_extraction_skip_tables=form_extraction_skip_tables,
-                **kwargs,
-            )
-            out_elements = _process_uncategorized_text_elements(elements)
-
+    if strategy == PartitionStrategy.HI_RES or strategy == PartitionStrategy.OCR_ONLY:
+        raise NotImplementedError(STRATEGY_NOT_IMPLEMENTED_MSGE.format(strategy=strategy))
     elif strategy == PartitionStrategy.FAST:
         out_elements = _partition_pdf_with_pdfparser(
             extracted_elements=extracted_elements,
@@ -323,24 +257,6 @@ def partition_pdf_or_image(
         )
 
         return out_elements
-
-    elif strategy == PartitionStrategy.OCR_ONLY:
-        # NOTE(robinson): Catches file conversion warnings when running with PDFs
-        with warnings.catch_warnings():
-            elements = _partition_pdf_or_image_with_ocr(
-                filename=filename,
-                file=file,
-                include_page_breaks=include_page_breaks,
-                languages=languages,
-                ocr_languages=ocr_languages,
-                is_image=is_image,
-                metadata_last_modified=metadata_last_modified or last_modified,
-                starting_page_number=starting_page_number,
-                **kwargs,
-            )
-            out_elements = _process_uncategorized_text_elements(elements)
-
-    return out_elements
 
 
 def extractable_elements(
@@ -506,312 +422,6 @@ def _get_pdf_page_number(
     return number_of_pages
 
 
-def check_pdf_hi_res_max_pages_exceeded(
-    filename: str = "",
-    file: Optional[bytes | IO[bytes]] = None,
-    pdf_hi_res_max_pages: int = None,
-) -> None:
-    """Checks whether PDF exceeds pdf_hi_res_max_pages limit."""
-    if pdf_hi_res_max_pages:
-        document_pages = _get_pdf_page_number(filename=filename, file=file)
-        if document_pages > pdf_hi_res_max_pages:
-            raise PageCountExceededError(
-                document_pages=document_pages, pdf_hi_res_max_pages=pdf_hi_res_max_pages
-            )
-
-
-@requires_dependencies("unstructured_inference")
-def _partition_pdf_or_image_local(
-    filename: str = "",
-    file: Optional[bytes | IO[bytes]] = None,
-    is_image: bool = False,
-    infer_table_structure: bool = False,
-    include_page_breaks: bool = False,
-    languages: Optional[list[str]] = None,
-    ocr_languages: Optional[str] = None,
-    ocr_mode: str = OCRMode.FULL_PAGE.value,
-    model_name: Optional[str] = None,  # to be deprecated in favor of `hi_res_model_name`
-    hi_res_model_name: Optional[str] = None,
-    pdf_image_dpi: Optional[int] = None,
-    metadata_last_modified: Optional[str] = None,
-    pdf_text_extractable: bool = False,
-    extract_images_in_pdf: bool = False,
-    extract_image_block_types: Optional[list[str]] = None,
-    extract_image_block_output_dir: Optional[str] = None,
-    extract_image_block_to_payload: bool = False,
-    analysis: bool = False,
-    analyzed_image_output_dir_path: Optional[str] = None,
-    starting_page_number: int = 1,
-    extract_forms: bool = False,
-    form_extraction_skip_tables: bool = True,
-    pdf_hi_res_max_pages: Optional[int] = None,
-    **kwargs: Any,
-) -> list[Element]:
-    """Partition using package installed locally"""
-    from unstructured_inference.inference.layout import (
-        process_data_with_model,
-        process_file_with_model,
-    )
-
-    from unstructured.partition.pdf_image.ocr import process_data_with_ocr, process_file_with_ocr
-    from unstructured.partition.pdf_image.pdfminer_processing import (
-        process_data_with_pdfminer,
-        process_file_with_pdfminer,
-    )
-
-    if not is_image:
-        check_pdf_hi_res_max_pages_exceeded(
-            filename=filename, file=file, pdf_hi_res_max_pages=pdf_hi_res_max_pages
-        )
-
-    hi_res_model_name = hi_res_model_name or model_name or default_hi_res_model()
-    if pdf_image_dpi is None:
-        pdf_image_dpi = 300 if hi_res_model_name.startswith("chipper") else 200
-    if (pdf_image_dpi < 300) and (hi_res_model_name.startswith("chipper")):
-        logger.warning(
-            "The Chipper model performs better when images are rendered with DPI >= 300 "
-            f"(currently {pdf_image_dpi}).",
-        )
-
-    od_model_layout_dumper: Optional[ObjectDetectionLayoutDumper] = None
-    extracted_layout_dumper: Optional[ExtractedLayoutDumper] = None
-    ocr_layout_dumper: Optional[OCRLayoutDumper] = None
-    final_layout_dumper: Optional[FinalLayoutDumper] = None
-
-    skip_analysis_dump = env_config.ANALYSIS_DUMP_OD_SKIP
-
-    if file is None:
-        inferred_document_layout = process_file_with_model(
-            filename,
-            is_image=is_image,
-            model_name=hi_res_model_name,
-            pdf_image_dpi=pdf_image_dpi,
-        )
-
-        if hi_res_model_name.startswith("chipper"):
-            # NOTE(alan): We shouldn't do OCR with chipper
-            # NOTE(antonio): We shouldn't do PDFMiner with chipper
-            final_document_layout = inferred_document_layout
-        else:
-            extracted_layout = (
-                process_file_with_pdfminer(filename=filename, dpi=pdf_image_dpi)
-                if pdf_text_extractable
-                else []
-            )
-
-            if analysis:
-                if not analyzed_image_output_dir_path:
-                    if env_config.GLOBAL_WORKING_DIR_ENABLED:
-                        analyzed_image_output_dir_path = str(
-                            Path(env_config.GLOBAL_WORKING_PROCESS_DIR) / "annotated"
-                        )
-                    else:
-                        analyzed_image_output_dir_path = str(Path.cwd() / "annotated")
-                os.makedirs(analyzed_image_output_dir_path, exist_ok=True)
-                if not skip_analysis_dump:
-                    od_model_layout_dumper = ObjectDetectionLayoutDumper(
-                        layout=inferred_document_layout,
-                        model_name=hi_res_model_name,
-                    )
-                    extracted_layout_dumper = ExtractedLayoutDumper(
-                        layout=extracted_layout,
-                    )
-                    ocr_layout_dumper = OCRLayoutDumper()
-            # NOTE(christine): merged_document_layout = extracted_layout + inferred_layout
-            merged_document_layout = merge_inferred_with_extracted_layout(
-                inferred_document_layout=inferred_document_layout,
-                extracted_layout=extracted_layout,
-                hi_res_model_name=hi_res_model_name,
-            )
-
-            final_document_layout = process_file_with_ocr(
-                filename,
-                merged_document_layout,
-                extracted_layout=extracted_layout,
-                is_image=is_image,
-                infer_table_structure=infer_table_structure,
-                ocr_languages=ocr_languages,
-                ocr_mode=ocr_mode,
-                pdf_image_dpi=pdf_image_dpi,
-                ocr_layout_dumper=ocr_layout_dumper,
-            )
-    else:
-        inferred_document_layout = process_data_with_model(
-            file,
-            is_image=is_image,
-            model_name=hi_res_model_name,
-            pdf_image_dpi=pdf_image_dpi,
-        )
-
-        if hi_res_model_name.startswith("chipper"):
-            # NOTE(alan): We shouldn't do OCR with chipper
-            # NOTE(antonio): We shouldn't do PDFMiner with chipper
-            final_document_layout = inferred_document_layout
-        else:
-            if hasattr(file, "seek"):
-                file.seek(0)
-
-            extracted_layout = (
-                process_data_with_pdfminer(file=file, dpi=pdf_image_dpi)
-                if pdf_text_extractable
-                else []
-            )
-
-            if analysis:
-                if not analyzed_image_output_dir_path:
-                    if env_config.GLOBAL_WORKING_DIR_ENABLED:
-                        analyzed_image_output_dir_path = str(
-                            Path(env_config.GLOBAL_WORKING_PROCESS_DIR) / "annotated"
-                        )
-                    else:
-                        analyzed_image_output_dir_path = str(Path.cwd() / "annotated")
-                if not skip_analysis_dump:
-                    od_model_layout_dumper = ObjectDetectionLayoutDumper(
-                        layout=inferred_document_layout,
-                        model_name=hi_res_model_name,
-                    )
-                    extracted_layout_dumper = ExtractedLayoutDumper(
-                        layout=extracted_layout,
-                    )
-                    ocr_layout_dumper = OCRLayoutDumper()
-
-            # NOTE(christine): merged_document_layout = extracted_layout + inferred_layout
-            merged_document_layout = merge_inferred_with_extracted_layout(
-                inferred_document_layout=inferred_document_layout,
-                extracted_layout=extracted_layout,
-                hi_res_model_name=hi_res_model_name,
-            )
-
-            if hasattr(file, "seek"):
-                file.seek(0)
-            final_document_layout = process_data_with_ocr(
-                file,
-                merged_document_layout,
-                extracted_layout=extracted_layout,
-                is_image=is_image,
-                infer_table_structure=infer_table_structure,
-                ocr_languages=ocr_languages,
-                ocr_mode=ocr_mode,
-                pdf_image_dpi=pdf_image_dpi,
-                ocr_layout_dumper=ocr_layout_dumper,
-            )
-
-    # NOTE(alan): starting with v2, chipper sorts the elements itself.
-    if hi_res_model_name.startswith("chipper") and hi_res_model_name != "chipperv1":
-        kwargs["sort_mode"] = SORT_MODE_DONT
-
-    final_document_layout = clean_pdfminer_inner_elements(final_document_layout)
-
-    for page in final_document_layout.pages:
-        for el in page.elements:
-            el.text = el.text or ""
-
-    elements = document_to_element_list(
-        final_document_layout,
-        sortable=True,
-        include_page_breaks=include_page_breaks,
-        last_modification_date=metadata_last_modified,
-        # NOTE(crag): do not attempt to derive ListItem's from a layout-recognized "list"
-        # block with NLP rules. Otherwise, the assumptions in
-        # unstructured.partition.common::layout_list_to_list_items often result in weird chunking.
-        infer_list_items=False,
-        languages=languages,
-        starting_page_number=starting_page_number,
-        **kwargs,
-    )
-
-    extract_image_block_types = check_element_types_to_extract(extract_image_block_types)
-    #  NOTE(christine): `extract_images_in_pdf` would deprecate
-    #  (but continue to support for a while)
-    if extract_images_in_pdf:
-        save_elements(
-            elements=elements,
-            starting_page_number=starting_page_number,
-            element_category_to_save=ElementType.IMAGE,
-            filename=filename,
-            file=file,
-            is_image=is_image,
-            pdf_image_dpi=pdf_image_dpi,
-            extract_image_block_to_payload=extract_image_block_to_payload,
-            output_dir_path=extract_image_block_output_dir,
-        )
-
-    for el_type in extract_image_block_types:
-        if extract_images_in_pdf and el_type == ElementType.IMAGE:
-            continue
-
-        save_elements(
-            elements=elements,
-            starting_page_number=starting_page_number,
-            element_category_to_save=el_type,
-            filename=filename,
-            file=file,
-            is_image=is_image,
-            pdf_image_dpi=pdf_image_dpi,
-            extract_image_block_to_payload=extract_image_block_to_payload,
-            output_dir_path=extract_image_block_output_dir,
-        )
-
-    out_elements = []
-    for el in elements:
-        if isinstance(el, PageBreak) and not include_page_breaks:
-            continue
-
-        if isinstance(el, Image):
-            out_elements.append(cast(Element, el))
-        # NOTE(crag): this is probably always a Text object, but check for the sake of typing
-        elif isinstance(el, Text):
-            el.text = re.sub(
-                RE_MULTISPACE_INCLUDING_NEWLINES,
-                " ",
-                el.text or "",
-            ).strip()
-            # NOTE(alan): with chipper there are parent elements with no text we don't want to
-            # filter those out and leave the children orphaned.
-            if el.text or isinstance(el, PageBreak) or hi_res_model_name.startswith("chipper"):
-                out_elements.append(cast(Element, el))
-
-    if extract_forms:
-        forms = run_form_extraction(
-            file=file,
-            filename=filename,
-            model_name=hi_res_model_name,
-            elements=out_elements,
-            skip_table_regions=form_extraction_skip_tables,
-        )
-        out_elements.extend(forms)
-
-    if analysis:
-        if not skip_analysis_dump:
-            final_layout_dumper = FinalLayoutDumper(
-                layout=out_elements,
-            )
-        layout_dumpers = []
-        if od_model_layout_dumper:
-            layout_dumpers.append(od_model_layout_dumper)
-        if extracted_layout_dumper:
-            layout_dumpers.append(extracted_layout_dumper)
-        if ocr_layout_dumper:
-            layout_dumpers.append(ocr_layout_dumper)
-        if final_layout_dumper:
-            layout_dumpers.append(final_layout_dumper)
-        save_analysis_artifiacts(
-            *layout_dumpers,
-            filename=filename,
-            file=file,
-            is_image=is_image,
-            analyzed_image_output_dir_path=analyzed_image_output_dir_path,
-            skip_bboxes=env_config.ANALYSIS_BBOX_SKIP,
-            skip_dump_od=env_config.ANALYSIS_DUMP_OD_SKIP,
-            draw_grid=env_config.ANALYSIS_BBOX_DRAW_GRID,
-            draw_caption=env_config.ANALYSIS_BBOX_DRAW_CAPTION,
-            resize=env_config.ANALYSIS_BBOX_RESIZE,
-            format=env_config.ANALYSIS_BBOX_FORMAT,
-        )
-
-    return out_elements
-
-
 def _partition_pdf_with_pdfparser(
     extracted_elements: list[list[Element]],
     include_page_breaks: bool = False,
@@ -834,117 +444,6 @@ def _partition_pdf_with_pdfparser(
             elements.append(PageBreak(text=""))
 
     return elements
-
-
-def _partition_pdf_or_image_with_ocr(
-    filename: str = "",
-    file: Optional[bytes | IO[bytes]] = None,
-    include_page_breaks: bool = False,
-    languages: Optional[list[str]] = None,
-    ocr_languages: Optional[str] = None,
-    is_image: bool = False,
-    metadata_last_modified: Optional[str] = None,
-    starting_page_number: int = 1,
-    **kwargs: Any,
-):
-    """Partitions an image or PDF using OCR. For PDFs, each page is converted
-    to an image prior to processing."""
-
-    elements = []
-    if is_image:
-        images = []
-        image = PILImage.open(file) if file is not None else PILImage.open(filename)
-        images.append(image)
-
-        for page_number, image in enumerate(images, start=starting_page_number):
-            page_elements = _partition_pdf_or_image_with_ocr_from_image(
-                image=image,
-                languages=languages,
-                ocr_languages=ocr_languages,
-                page_number=page_number,
-                include_page_breaks=include_page_breaks,
-                metadata_last_modified=metadata_last_modified,
-                **kwargs,
-            )
-            elements.extend(page_elements)
-    else:
-        for page_number, image in enumerate(
-            convert_pdf_to_images(filename, file), start=starting_page_number
-        ):
-            page_elements = _partition_pdf_or_image_with_ocr_from_image(
-                image=image,
-                languages=languages,
-                ocr_languages=ocr_languages,
-                page_number=page_number,
-                include_page_breaks=include_page_breaks,
-                metadata_last_modified=metadata_last_modified,
-                **kwargs,
-            )
-            elements.extend(page_elements)
-
-    return elements
-
-
-def _partition_pdf_or_image_with_ocr_from_image(
-    image: PILImage.Image,
-    languages: Optional[list[str]] = None,
-    ocr_languages: Optional[str] = None,
-    page_number: int = 1,
-    include_page_breaks: bool = False,
-    metadata_last_modified: Optional[str] = None,
-    sort_mode: str = SORT_MODE_XY_CUT,
-    **kwargs: Any,
-) -> list[Element]:
-    """Extract `unstructured` elements from an image using OCR and perform partitioning."""
-
-    from unstructured.partition.utils.ocr_models.ocr_interface import OCRAgent
-
-    ocr_agent = OCRAgent.get_agent(language=ocr_languages)
-
-    # NOTE(christine): `pytesseract.image_to_string()` returns sorted text
-    if ocr_agent.is_text_sorted():
-        sort_mode = SORT_MODE_DONT
-
-    ocr_data = ocr_agent.get_layout_elements_from_image(image=image)
-
-    metadata = ElementMetadata(
-        last_modified=metadata_last_modified,
-        filetype=image.format,
-        page_number=page_number,
-        languages=languages,
-    )
-
-    page_elements = ocr_data_to_elements(
-        ocr_data,
-        image_size=image.size,
-        common_metadata=metadata,
-    )
-
-    sorted_page_elements = page_elements
-    if sort_mode != SORT_MODE_DONT:
-        sorted_page_elements = sort_page_elements(page_elements, sort_mode)
-
-    if include_page_breaks:
-        sorted_page_elements.append(PageBreak(text=""))
-
-    return page_elements
-
-
-def _process_uncategorized_text_elements(elements: list[Element]):
-    """Processes a list of elements, creating a new list where elements with the
-    category `UncategorizedText` are replaced with corresponding
-    elements created from their text content."""
-
-    out_elements = []
-    for el in elements:
-        if hasattr(el, "category") and el.category == ElementType.UNCATEGORIZED_TEXT:
-            new_el = element_from_text(cast(Text, el).text)
-            new_el.metadata = el.metadata
-        else:
-            new_el = el
-        out_elements.append(new_el)
-
-    return out_elements
 
 
 def _extract_text(item: LTItem) -> str:
